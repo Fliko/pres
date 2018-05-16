@@ -1,14 +1,13 @@
 package main
 
 import (
-	"fmt"
+	"container/heap"
 	"math/rand"
-	"time"
 )
 
 type Request struct {
-	fn func(*Worker) int // The operation to perform.
-	c  chan int          // The channel to return the result.
+	fn func() int // The operation to perform.
+	c  chan int   // The channel to return the result.
 }
 
 type Worker struct {
@@ -20,58 +19,29 @@ type Worker struct {
 type Pool []*Worker
 
 type Balancer struct {
-	pool        Pool
-	dispatching Pool
-	done        chan *Worker
+	pool Pool
+	done chan *Worker
 }
 
 func main() {
-	var p Pool // setuup variables for balancer
-	var d Pool
-	var ch = make(chan *Worker) //Communicates between balancer and worker
 
-	for i := 0; i < 10; i++ { // add worker slice to Balancer
-		c := make(chan Request, 1600000)
-		proc := Worker{c, 0, i}
-		go proc.work(ch)
-		p = append(p, &proc)
-	}
-
-	bal := Balancer{p, d, ch}
-
-	var wrk = make(chan Request) //Talk between requester and balancer
-
-	go bal.balance(wrk) // balance
-
-	go func() { // Make any number of requests
-		for j := 0; j < 1600000; j++ {
-			go requester(wrk)
-		}
-	}()
-
-	time.Sleep(time.Minute)
-}
-
-func workFn(w *Worker) int {
-	time.Sleep(time.Millisecond)
-	return w.index
 }
 
 func requester(work chan<- Request) {
-	nWorker := 10
 	c := make(chan int)
 	for {
 		// Kill some time (fake load).
-		time.Sleep(time.Duration(rand.Intn(nWorker)) * time.Millisecond)
+		Sleep(rand.Int63n(nWorker * 2 * Second))
 		work <- Request{workFn, c} // send request
-		fmt.Println(<-c)           // wait for answer
+		result := <-c              // wait for answer
+		furtherProcess(result)
 	}
 }
 
 func (w *Worker) work(done chan *Worker) {
 	for {
 		req := <-w.requests // get Request from balancer
-		req.c <- req.fn(w)  // call fn and send result
+		req.c <- req.fn()   // call fn and send result
 		done <- w           // we've finished this request
 	}
 }
@@ -86,40 +56,26 @@ func (b *Balancer) balance(work chan Request) {
 		}
 	}
 }
-
-func (p Pool) Less() *Worker {
-	min := p[0]
-	ind := 0
-	for i := 1; i < len(p); i++ {
-		if p[i].pending < min.pending {
-			min = p[i]
-			ind = i
-		}
-	}
-	tmp := ind + 1
-	p = append(p[:ind], p[tmp:]...)
-	return min
+func (p Pool) Less(i, j int) bool {
+	return p[i].pending < p[j].pending
 }
 
 // Send Request to worker
 func (b *Balancer) dispatch(req Request) {
 	// Grab the least loaded worker...
-	w := b.pool.Less()
-	b.dispatching = append(b.dispatching, w)
-
+	w := heap.Pop(&b.pool).(*Worker)
 	// ...send it the task.
 	w.requests <- req
 	// One more in its work queue.
 	w.pending++
 	// Put it into its place on the heap.
-	for i := 1; i < len(b.dispatching); i++ {
-		if b.dispatching[i] == w {
-			b.dispatching = append(b.dispatching[:i], b.dispatching[i+1:]...)
-		}
-	}
-	b.pool = append(b.pool, w)
+	heap.Push(&b.pool, w)
 }
 func (b *Balancer) completed(w *Worker) {
 	// One fewer in the queue.
 	w.pending--
+	// Remove it from heap.
+	heap.Remove(&b.pool, w.index)
+	// Put it into its place on the heap.
+	heap.Push(&b.pool, w)
 }
