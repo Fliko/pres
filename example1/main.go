@@ -31,7 +31,7 @@ func main() {
 	var ch = make(chan *Worker) //Communicates between balancer and worker
 
 	for i := 0; i < 10; i++ { // add worker slice to Balancer
-		c := make(chan Request, 1600000)
+		c := make(chan Request, 100000)
 		proc := Worker{c, 0, i}
 		go proc.work(ch)
 		p = append(p, &proc)
@@ -44,7 +44,7 @@ func main() {
 	go bal.balance(wrk) // balance
 
 	go func() { // Make any number of requests
-		for j := 0; j < 1600000; j++ {
+		for j := 0; j < 1000000; j++ {
 			go requester(wrk)
 		}
 	}()
@@ -53,7 +53,7 @@ func main() {
 }
 
 func workFn(w *Worker) int {
-	time.Sleep(time.Millisecond)
+	time.Sleep(time.Millisecond * 10)
 	return w.index
 }
 
@@ -62,7 +62,7 @@ func requester(work chan<- Request) {
 	c := make(chan int)
 	for {
 		// Kill some time (fake load).
-		time.Sleep(time.Duration(rand.Intn(nWorker)) * time.Millisecond)
+		time.Sleep(time.Duration(rand.Intn(nWorker)*100) * time.Millisecond)
 		work <- Request{workFn, c} // send request
 		fmt.Println(<-c)           // wait for answer
 	}
